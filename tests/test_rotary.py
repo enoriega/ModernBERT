@@ -74,7 +74,7 @@ def test_rotary_emb_unpad(interleaved, rotary_fraction, seqlen_offsets_type, dty
     lengths = torch.randint(max(1, seqlen - 20), seqlen + 1, (batch_size, 1), device=device)
     padding_mask = rearrange(torch.arange(seqlen, device=device), "s -> 1 s") < lengths
 
-    qkv_unpad, indices, cu_seqlens, max_seqlen = unpad_input(qkv, padding_mask)
+    qkv_unpad, indices, cu_seqlens, max_seqlen, *_ = unpad_input(qkv, padding_mask)
     qkv_unpad = qkv_unpad.requires_grad_()
 
     cos, sin = generate_cos_sin(seqlen, rotary_dim, device, dtype)
@@ -141,7 +141,7 @@ def test_rotary(rotary_emb_fraction, dtype):
     position_ids = torch.arange(0, seqlen, dtype=torch.long, device=device)
     position_ids = position_ids.unsqueeze(0)
 
-    qkv_unpad, indices, cu_seqlens, max_seqlen = unpad_input(qkv, padding_mask)
+    qkv_unpad, indices, cu_seqlens, max_seqlen, *_ = unpad_input(qkv, padding_mask)
     qkv_unpad = qkv_unpad.requires_grad_()
 
     qkv_og = qkv.clone().detach()  # Our implementation modifies qkv inplace
