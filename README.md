@@ -16,23 +16,29 @@ All code used in this repository is the code used as part of our experiments for
 
 ## Setup
 
-We have fully documented the environment used to train ModernBERT, which can be installed on a GPU-equipped machine with the following commands:
+The environment is managed with [uv](https://docs.astral.sh/uv/) (Python 3.12). Install uv, then create the environment:
 
 ```bash
-conda env create -f environment.yaml
-# if the conda environment errors out set channel priority to flexible:
-# conda config --set channel_priority flexible
-conda activate bert24
-# if using H100s clone and build flash attention 3
-# git clone https://github.com/Dao-AILab/flash-attention.git
-# cd flash-attention/hopper
-# python setup.py install
-# install flash attention 2 (model uses FA3+FA2 or just FA2 if FA3 isn't supported)
-pip install "flash_attn==2.6.3" --no-build-isolation
-# or download a precompiled wheel from https://github.com/Dao-AILab/flash-attention/releases/tag/v2.6.3
-# or limit the number of parallel compilation jobs
-# MAX_JOBS=8 pip install "flash_attn==2.6.3" --no-build-isolation
+# CPU-only / local dev (no Flash Attention): core deps only
+uv sync
+
+# GPU training: add Flash Attention 2 (prebuilt wheel, Linux + CUDA)
+uv sync --extra flash
+
+# optional extras: data prep tooling and ColBERT retrieval evals
+uv sync --extra flash --extra data --extra colbert
 ```
+
+Run any entry point through the environment with `uv run`, e.g. `uv run composer main.py <config.yaml>`.
+
+Notes on Flash Attention:
+- Flash Attention is **optional**. Without it, FlexBERT automatically falls back to PyTorch's SDPA attention, so `uv sync` alone is enough for development and CPU runs.
+- The `flash` extra installs a prebuilt `flash-attn==2.8.3` wheel for cp312 / torch 2.7 / CUDA 12 (cxx11 ABI TRUE). A cu12 wheel runs fine on CUDA 13 hosts — torch and flash-attn bundle their own CUDA runtime, and the NVIDIA driver is backward compatible.
+- H100 Flash Attention 3 is still built separately:
+  ```bash
+  # git clone https://github.com/Dao-AILab/flash-attention.git
+  # cd flash-attention/hopper && python setup.py install
+  ```
 
 ## Training
 
@@ -41,7 +47,7 @@ Training heavily leverages the [composer](https://github.com/mosaicml/composer) 
 ### Launch command example
 To run a training job using `yamls/main/modernbert-base.yaml` on all available GPUs, use the following command.
 ```
-composer main.py yamls/main/modernbert-base.yaml
+uv run composer main.py yamls/main/modernbert-base.yaml
 ```
 
 ### Data

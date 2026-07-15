@@ -1,0 +1,92 @@
+[project]
+name = "modernbert"
+version = "0.1.0"
+description = "ModernBERT — pre-training and evaluation of modernized BERT encoders (FlexBERT)."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.13"
+
+# Core runtime dependencies. Reconciled from the former environment.yaml pip
+# section (the authoritative GPU env), bumped so the whole stack is compatible
+# with torch 2.7 (the newest torch mosaicml/composer 0.32.1 supports).
+dependencies = [
+    "torch==2.7.0",
+    "einops==0.8.0",
+    "transformers==4.40.2",
+    "omegaconf==2.3.0",
+    "mosaicml[nlp,wandb]==0.32.1",
+    "mosaicml-cli",
+    "mosaicml-streaming",
+    "torch-optimi==0.2.1",
+    "numba",
+    "evaluate",
+    "typer",
+    "ninja",
+    "ruamel-yaml",
+    "zstd",
+]
+
+[project.optional-dependencies]
+# Flash Attention 2 — optional. The FlexBERT attention layer imports flash_attn
+# behind try/except (src/bert_layers/attention.py) and falls back to PyTorch
+# SDPA when it is absent, so this extra is only needed for peak GPU throughput.
+# We install a prebuilt wheel (see [tool.uv.sources]) to avoid a source build.
+# Linux/CUDA only; skipped on other platforms (e.g. macOS CPU dev).
+flash = ["flash-attn==2.8.3; sys_platform == 'linux'"]
+
+# Data prep / conversion tooling (former requirements-data.txt).
+data = [
+    "datasets",
+    "datatrove==0.2.0",
+    "huggingface_hub==0.23.1",
+    "pyyaml",
+    "tqdm",
+]
+
+# Retrieval / ColBERT eval (former requirements-colbert.txt). GPU/Linux only.
+colbert = [
+    "colbert-ai==0.2.19",
+    "faiss-gpu==1.14.3; sys_platform == 'linux'",
+    "ranx",
+    "ir_datasets",
+]
+
+# Linting + tests.
+dev = [
+    "ruff",
+    "pytest",
+]
+
+[tool.uv]
+# This repo is a collection of entry-point scripts (main.py, eval.py, ...) that
+# add the repo root to sys.path themselves; it is not an installable package, so
+# don't try to build/install the project itself into the venv.
+package = false
+
+# The CUDA torch wheel and the flash-attn wheel below are Linux-only. Restrict
+# the universal lock to platforms we actually target so resolution stays clean.
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
+
+# Dedicated index for CUDA torch wheels (replaces the conda pytorch/nvidia
+# channels). Marked `explicit` so only packages routed here via
+# [tool.uv.sources] use it — everything else stays on PyPI.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+# On Linux, pull the CUDA 12.8 build of torch. On macOS, fall back to the
+# default PyPI wheel (CPU/MPS) so local dev still works without CUDA.
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+
+# Prebuilt flash-attn 2.8.3 wheel for cp312 / torch 2.7 / CUDA 12 (cxx11 ABI
+# TRUE). A cu12 wheel runs fine on CUDA 13 hosts: the CUDA runtime is bundled in
+# the torch/flash wheels and the NVIDIA driver is backward compatible — only
+# torch and flash-attn need to share the same CUDA major (both cu12 here).
+flash-attn = [
+    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3%2Bcu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+]

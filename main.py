@@ -462,7 +462,9 @@ def main(cfg: DictConfig, return_trainer: bool = False, do_train: bool = True) -
         load_weights_only=cfg.get("load_weights_only", False),
         python_log_level=cfg.get("python_log_level", None),
         autoresume=cfg.get("autoresume", None),
-        fsdp_config=cfg.get("fsdp_config", None),
+        # composer >=0.30 replaced `fsdp_config` with `parallelism_config`, which
+        # nests the FSDP options under a `fsdp` key.
+        parallelism_config=({"fsdp": cfg.get("fsdp_config")} if cfg.get("fsdp_config", None) is not None else None),
         compile_config=cfg.get("compile_config", None),
     )
 
