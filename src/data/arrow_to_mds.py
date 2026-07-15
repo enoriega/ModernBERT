@@ -15,11 +15,13 @@ Example:
 """
 
 import argparse
+import glob
+import json
 import os
 
 import numpy as np
 import tqdm
-from datasets import Dataset, DatasetDict, load_from_disk
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
 from streaming import MDSWriter
 
 from data_utils import MDS_COLS_TOKENIZED
@@ -50,6 +52,45 @@ def resolve_id_column(column_names, explicit):
     )
 
 
+def _load_split_from_arrow_files(split_dir: str) -> Dataset:
+    """Load a saved-to-disk split by reading its arrow files directly.
+
+    Bypasses `dataset_info.json`, whose feature schema can fail to parse when the
+    dataset was written by a newer `datasets` version than the one installed
+    (e.g. the `List` feature type). Column types are recovered from the arrow
+    schema instead, which is all this converter needs.
+    """
+    state_path = os.path.join(split_dir, "state.json")
+    if os.path.isfile(state_path):
+        with open(state_path) as f:
+            files = [os.path.join(split_dir, e["filename"]) for e in json.load(f)["_data_files"]]
+    else:
+        files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
+    if not files:
+        raise ValueError(f"No arrow files found in {split_dir}")
+    return concatenate_datasets([Dataset.from_file(f) for f in files])
+
+
+def load_splits(path: str):
+    """Return an ordered dict {split_name_or_None: Dataset} for a saved arrow dataset.
+
+    Tries `load_from_disk` first; on any failure (typically a datasets-version
+    metadata mismatch) falls back to reading the arrow files directly.
+    """
+    try:
+        ds = load_from_disk(path)
+        return dict(ds) if isinstance(ds, DatasetDict) else {None: ds}
+    except Exception as e:
+        print(f"load_from_disk failed ({type(e).__name__}: {e}); falling back to raw arrow-file loading.")
+
+    dict_manifest = os.path.join(path, "dataset_dict.json")
+    if os.path.isfile(dict_manifest):
+        with open(dict_manifest) as f:
+            split_names = json.load(f)["splits"]
+        return {name: _load_split_from_arrow_files(os.path.join(path, name)) for name in split_names}
+    return {None: _load_split_from_arrow_files(path)}
+
+
 def convert_split(dataset: Dataset, out_dir: str, id_column: str, dtype: np.dtype, compression, size_limit):
     """Write a single split's rows to an MDS folder at out_dir."""
     if "input_ids" not in dataset.column_names:
@@ -57,7 +98,7 @@ def convert_split(dataset: Dataset, out_dir: str, id_column: str, dtype: np.dtyp
             f"Dataset must contain an 'input_ids' column. Found: {dataset.column_names}"
         )
     id_col = resolve_id_column(dataset.column_names, id_column)
-    dtype_max = np.iinfo(dtype).max
+    dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
 
     os.makedirs(out_dir, exist_ok=True)
     with MDSWriter(
@@ -67,14 +108,16 @@ def convert_split(dataset: Dataset, out_dir: str, id_column: str, dtype: np.dtyp
         size_limit=size_limit,
     ) as writer:
         for row in tqdm.tqdm(dataset, desc=f"Writing {out_dir}", total=len(dataset)):
-            input_ids = np.asarray(row["input_ids"], dtype=dtype)
-            # Guard against silent overflow when down-casting token ids.
-            if input_ids.size and int(input_ids.max()) > dtype_max:
+            # Build at full width first so we can give a clear error instead of a
+            # raw numpy OverflowError when a token id doesn't fit the target dtype.
+            wide = np.asarray(row["input_ids"], dtype=np.int64)
+            if wide.size and (int(wide.max()) > dtype_max or int(wide.min()) < dtype_min):
                 raise ValueError(
-                    f"A token id exceeds the max representable by {dtype} ({dtype_max}). "
-                    f"Use a wider --dtype."
+                    f"Token id {int(wide.max())} does not fit dtype {dtype} "
+                    f"(range [{dtype_min}, {dtype_max}]). Use a wider --dtype (int32 is the default; "
+                    f"int16 is too small for a ~50k vocab)."
                 )
-            writer.write({"input_ids": input_ids, "id": str(row[id_col])})
+            writer.write({"input_ids": wide.astype(dtype), "id": str(row[id_col])})
     return len(dataset)
 
 
@@ -106,16 +149,14 @@ def main():
 
     dtype = np.dtype(args.dtype)
 
-    ds = load_from_disk(args.input)
+    splits = load_splits(args.input)
 
-    if isinstance(ds, DatasetDict):
-        splits = {args.split: ds[args.split]} if args.split else dict(ds)
-        if args.split and args.split not in ds:
-            raise ValueError(f"Split '{args.split}' not in dataset. Available: {list(ds.keys())}")
-    else:
-        if args.split:
+    if args.split:
+        if list(splits) == [None]:
             raise ValueError("--split given but the input is a single Dataset, not a DatasetDict.")
-        splits = {None: ds}
+        if args.split not in splits:
+            raise ValueError(f"Split '{args.split}' not in dataset. Available: {list(splits)}")
+        splits = {args.split: splits[args.split]}
 
     counts = {}
     for split_name, split_ds in splits.items():
