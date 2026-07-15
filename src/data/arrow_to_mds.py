@@ -20,8 +20,9 @@ import json
 import os
 
 import numpy as np
+import pyarrow as pa
 import tqdm
-from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
+from datasets import Dataset, DatasetDict, load_from_disk
 from streaming import MDSWriter
 
 from data_utils import MDS_COLS_TOKENIZED
@@ -52,13 +53,25 @@ def resolve_id_column(column_names, explicit):
     )
 
 
+def _read_arrow_table(path: str) -> "pa.Table":
+    """Read one saved arrow file with pyarrow, trying both IPC framings."""
+    try:
+        with pa.memory_map(path, "r") as src:
+            return pa.ipc.open_stream(src).read_all()
+    except pa.lib.ArrowInvalid:
+        with pa.memory_map(path, "r") as src:
+            return pa.ipc.open_file(src).read_all()
+
+
 def _load_split_from_arrow_files(split_dir: str) -> Dataset:
     """Load a saved-to-disk split by reading its arrow files directly.
 
-    Bypasses `dataset_info.json`, whose feature schema can fail to parse when the
-    dataset was written by a newer `datasets` version than the one installed
-    (e.g. the `List` feature type). Column types are recovered from the arrow
-    schema instead, which is all this converter needs.
+    Bypasses `dataset_info.json` AND the HF feature metadata embedded in each
+    arrow file's schema, both of which fail to parse when the dataset was written
+    by a newer `datasets` version than the one installed (e.g. the `List` feature
+    type). We read the raw table with pyarrow, strip the embedded metadata, and
+    let `datasets` infer features from the arrow types instead -- all this
+    converter needs is `input_ids` (list<int>) and the string id column.
     """
     state_path = os.path.join(split_dir, "state.json")
     if os.path.isfile(state_path):
@@ -68,7 +81,8 @@ def _load_split_from_arrow_files(split_dir: str) -> Dataset:
         files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
     if not files:
         raise ValueError(f"No arrow files found in {split_dir}")
-    return concatenate_datasets([Dataset.from_file(f) for f in files])
+    tables = [_read_arrow_table(f).replace_schema_metadata(None) for f in files]
+    return Dataset(pa.concat_tables(tables))
 
 
 def load_splits(path: str):
