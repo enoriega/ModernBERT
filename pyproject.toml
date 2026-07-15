@@ -90,3 +90,8 @@ torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
 flash-attn = [
     { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3%2Bcu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
 ]
+
+[tool.pyright]
+reportArgumentType = false
+reportAttributeAccessIssue = false
+reportCallIssue = false
