@@ -12,7 +12,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch==2.7.0",
     "einops==0.8.0",
-    "transformers==4.40.2",
+    "transformers==4.48.3",
     "omegaconf==2.3.0",
     "mosaicml[nlp,wandb]==0.32.1",
     "mosaicml-cli",
@@ -38,7 +38,7 @@ flash = ["flash-attn==2.8.3; sys_platform == 'linux'"]
 data = [
     "datasets",
     "datatrove==0.2.0",
-    "huggingface_hub==0.23.1",
+    "huggingface_hub>=0.24",
     "pyyaml",
     "tqdm",
 ]
