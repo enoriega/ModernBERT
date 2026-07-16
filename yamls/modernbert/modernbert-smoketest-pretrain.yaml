@@ -97,7 +97,7 @@ eval_loader:
 # Optimization — dur-relative so it works for a short run
 scheduler:
   name: linear_decay_with_warmup
-  t_warmup: 0.1dur
+  t_warmup: 10ba          # sequence packing => dataloader has no length; use batches/tokens, not dur/ep
   alpha_f: 0.02
 
 optimizer:
@@ -111,8 +111,8 @@ optimizer:
   filter_bias_norm_wd: true
   log_grad_norm: true
 
-max_duration: 1ep
-eval_interval: 1ep
+max_duration: 100ba     # sequence packing => count in batches (ba) or tokens (tok), not epochs
+eval_interval: 100ba
 global_train_batch_size: 16
 global_eval_batch_size: 16
 
@@ -144,6 +144,6 @@ callbacks:
 #     entity: your-entity
 
 # Checkpointing (optional for a smoke test)
-save_interval: 1ep
+save_interval: 100ba
 save_num_checkpoints_to_keep: 1
 save_folder: checkpoints/{run_name}
